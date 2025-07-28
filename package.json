@@ -1,0 +1,23 @@
+{
+  "name": "nodejs",
+  "version": "1.0.0",
+  "description": "",
+  "main": "bot.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node bot.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^22.13.11",
+    "axios": "^1.11.0",
+    "discord.js-selfbot-v13": "^3.7.0",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "libsodium-wrappers": "^0.7.15",
+    "@discordjs/opus": "^0.9.0",
+    "opusscript": "^0.0.8"
+  }
+}
