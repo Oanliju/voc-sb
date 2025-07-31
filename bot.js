@@ -1,100 +1,167 @@
-require("dotenv").config();
-const express = require("express");
-const { Client } = require("discord.js-selfbot-v13");
-const client = new Client({ checkUpdate: false });
+require('dotenv').config();
+const { Client } = require('discord.js-selfbot-v13');
+const express = require('express');
 
+// Configuration globale
+const config = {
+    // Discord
+    token: process.env.DISCORD_TOKEN,
+    
+    // Système de réponse automatique
+    autoReply: {
+        targetChannelId: "1396113583531622562",
+        targetBotId: "1352630181403295816",
+        welcomeMessages: ["bienvenue", "welcome", "bienvenido", "ようこそ"],
+        responses: [
+            "Hello {user} ! Bienvenue sur Kayuna !!",
+            "Bienvenue sur Kayuna {user} :)",
+            "Salutations {user} !",
+            "Hey {user}, bienvenue parmi nous !",
+            "Ravi de te voir {user} !",
+            "Content de t'accueillir {user} !"
+        ],
+        cooldown: 3000, // 3s entre vos réponses
+        responseDelay: 4000 // 4s avant de répondre
+    },
+    
+    // Connexion vocale
+    voice: {
+        channelId: "1398387735181656094",
+        selfMute: false,
+        selfDeaf: false,
+        selfVideo: false,
+        stayTime: 0,
+        maxConnectionAttempts: 3,
+        retryDelay: 20000
+    }
+};
+
+// Initialisation
+const client = new Client({ checkUpdate: false });
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- Petit serveur pour Render ---
+// Serveur web pour keep-alive
 app.get("/", (req, res) => {
-  res.send("✅ Bot en ligne et actif !");
+    res.send("✅ Bot en ligne et actif !");
 });
 
 app.listen(PORT, () => {
-  console.log(`🌍 Serveur Express démarré sur le port ${PORT}`);
+    console.log(`🌍 Serveur Express démarré sur le port ${PORT}`);
 });
 
-// Configuration avec option caméra désactivée par défaut
-const config = {
-    token: process.env.DISCORD_TOKEN,
-    voiceChannelId: "1398387735181656094",
-    selfMute: false,
-    selfDeaf: false,
-    selfVideo: false, // Caméra désactivée par défaut
-    stayTime: 0,
-    maxConnectionAttempts: 3,
-    retryDelay: 20000,
+// Variables d'état
+const state = {
+    autoReply: {
+        lastReplyTime: 0
+    },
+    voice: {
+        attempts: 0,
+        success: false,
+        errors: [],
+        startTime: null,
+        connection: null
+    }
 };
 
-// Statistiques
-const stats = {
-    attempts: 0,
-    success: false,
-    errors: [],
-    startTime: null,
-    voiceConnection: null,
-};
-
+// Événements du client Discord
 client.on("ready", async () => {
     console.log(`\n🎮 ${client.user.username} prêt!`);
     await connectToVoice();
 });
 
-async function connectToVoice() {
-    stats.attempts++;
-    stats.startTime = new Date();
+client.on("messageCreate", async (message) => {
+    handleAutoReply(message);
+});
 
-    try {
-        if (stats.attempts > config.maxConnectionAttempts) {
-            throw new Error(
-                `Nombre maximum de tentatives (${config.maxConnectionAttempts}) atteint`,
-            );
+// Fonctionnalité de réponse automatique
+async function handleAutoReply(message) {
+    const { autoReply } = config;
+    const { lastReplyTime } = state.autoReply;
+    
+    // Vérifications de base
+    if (message.channelId !== autoReply.targetChannelId) return;
+    if (message.author.id !== autoReply.targetBotId) return;
+    if (message.author.id === client.user.id) return;
+
+    // Vérifier si le message est un message de bienvenue
+    const isWelcomeMessage = autoReply.welcomeMessages.some(word => 
+        message.content.toLowerCase().includes(word)
+    );
+
+    if (isWelcomeMessage && message.mentions.users.size > 0) {
+        const now = Date.now();
+        if (now - lastReplyTime < autoReply.cooldown) return;
+
+        try {
+            // Récupérer le premier utilisateur mentionné
+            const mentionedUser = message.mentions.users.first();
+            
+            // Choisir une réponse aléatoire
+            const randomResponse = autoReply.responses[
+                Math.floor(Math.random() * autoReply.responses.length)
+            ].replace('{user}', `<@${mentionedUser.id}>`);
+            
+            // Délai avant réponse
+            await new Promise(resolve => setTimeout(resolve, autoReply.responseDelay));
+            
+            await message.reply(randomResponse);
+            console.log(`[${new Date().toLocaleTimeString()}] Répondu à ${message.author.username} pour ${mentionedUser.tag}: "${randomResponse}"`);
+            state.autoReply.lastReplyTime = Date.now();
+        } catch (error) {
+            console.error("Erreur lors de la réponse:", error);
         }
-
-        console.log(
-            `🔍 Tentative #${stats.attempts} de connexion au salon ${config.voiceChannelId}...`,
-        );
-        const channel = client.channels.cache.get(config.voiceChannelId);
-
-        if (!channel) throw new Error("Salon vocal introuvable");
-
-        // Connexion avec option caméra (désactivée par défaut)
-        stats.voiceConnection = await client.voice.joinChannel(channel, {
-            selfMute: config.selfMute,
-            selfDeaf: config.selfDeaf,
-            selfVideo: config.selfVideo // Option caméra
-        });
-
-        stats.success = true;
-        console.log(`\n🎉 Connecté au salon ${channel.name}!`);
-        console.log(
-            `🔊 Audio: Mute=${config.selfMute} | Sourd=${config.selfDeaf} | Caméra: ${config.selfVideo ? 'ON' : 'OFF'}`
-        );
-
-        if (config.stayTime > 0) {
-            console.log(
-                `\n⏳ Déconnexion dans ${config.stayTime / 1000} secondes...`,
-            );
-            setTimeout(disconnectFromVoice, config.stayTime);
-        }
-    } catch (error) {
-        handleConnectionError(error);
     }
 }
 
-function handleConnectionError(error) {
-    stats.errors.push(error);
-    console.error(
-        `\n❌ ERREUR (tentative ${stats.attempts}/${config.maxConnectionAttempts}):`,
-    );
+// Fonctionnalité de connexion vocale
+async function connectToVoice() {
+    const { voice } = config;
+    const voiceState = state.voice;
+    
+    voiceState.attempts++;
+    voiceState.startTime = new Date();
+
+    try {
+        if (voiceState.attempts > voice.maxConnectionAttempts) {
+            throw new Error(`Nombre maximum de tentatives (${voice.maxConnectionAttempts}) atteint`);
+        }
+
+        console.log(`🔍 Tentative #${voiceState.attempts} de connexion au salon ${voice.channelId}...`);
+        const channel = client.channels.cache.get(voice.channelId);
+
+        if (!channel) throw new Error("Salon vocal introuvable");
+
+        voiceState.connection = await client.voice.joinChannel(channel, {
+            selfMute: voice.selfMute,
+            selfDeaf: voice.selfDeaf,
+            selfVideo: voice.selfVideo
+        });
+
+        voiceState.success = true;
+        console.log(`\n🎉 Connecté au salon ${channel.name}!`);
+        console.log(`🔊 Audio: Mute=${voice.selfMute} | Sourd=${voice.selfDeaf} | Caméra: ${voice.selfVideo ? 'ON' : 'OFF'}`);
+
+        if (voice.stayTime > 0) {
+            console.log(`\n⏳ Déconnexion dans ${voice.stayTime / 1000} secondes...`);
+            setTimeout(disconnectFromVoice, voice.stayTime);
+        }
+    } catch (error) {
+        handleVoiceConnectionError(error);
+    }
+}
+
+function handleVoiceConnectionError(error) {
+    const { voice } = config;
+    const voiceState = state.voice;
+    
+    voiceState.errors.push(error);
+    console.error(`\n❌ ERREUR (tentative ${voiceState.attempts}/${voice.maxConnectionAttempts}):`);
     console.error(`🔧 Détails: ${error.message}`);
 
-    if (stats.attempts < config.maxConnectionAttempts) {
-        console.log(
-            `\n⌛ Nouvelle tentative dans ${config.retryDelay / 1000} secondes...`,
-        );
-        setTimeout(connectToVoice, config.retryDelay);
+    if (voiceState.attempts < voice.maxConnectionAttempts) {
+        console.log(`\n⌛ Nouvelle tentative dans ${voice.retryDelay / 1000} secondes...`);
+        setTimeout(connectToVoice, voice.retryDelay);
     } else {
         console.log("\n💀 Échec après plusieurs tentatives. Arrêt...");
         process.exit(1);
@@ -102,17 +169,17 @@ function handleConnectionError(error) {
 }
 
 async function disconnectFromVoice() {
+    const voiceState = state.voice;
+    
     try {
-        if (!stats.voiceConnection) return;
+        if (!voiceState.connection) return;
 
         console.log("\n🔌 Déconnexion...");
-        await stats.voiceConnection.disconnect();
+        await voiceState.connection.disconnect();
 
-        const sessionTime = Math.round((new Date() - stats.startTime) / 1000);
+        const sessionTime = Math.round((new Date() - voiceState.startTime) / 1000);
         console.log(`\n✅ Session terminée après ${sessionTime} secondes`);
-        console.log(
-            `📊 Stats: ${stats.success ? "SUCCÈS" : "ÉCHEC"} | Tentatives: ${stats.attempts}`,
-        );
+        console.log(`📊 Stats: ${voiceState.success ? "SUCCÈS" : "ÉCHEC"} | Tentatives: ${voiceState.attempts}`);
     } catch (error) {
         console.error("❌ Erreur de déconnexion:", error.message);
     } finally {
