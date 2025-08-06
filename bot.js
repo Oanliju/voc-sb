@@ -7,23 +7,6 @@ const config = {
     // Discord
     token: process.env.DISCORD_TOKEN,
     
-    // Système de réponse automatique
-    autoReply: {
-        targetChannelId: "1396113583531622562",
-        targetBotId: "1352630181403295816",
-        welcomeMessages: ["bienvenue", "welcome", "bienvenido", "ようこそ"],
-        responses: [
-            "Hello {user} ! Bienvenue sur Kayuna !!",
-            "Bienvenue sur Kayuna {user} :)",
-            "Salutations {user} !",
-            "Hey {user}, bienvenue parmi nous !",
-            "Ravi de te voir {user} !",
-            "Content de t'accueillir {user} !"
-        ],
-        cooldown: 3000, // 3s entre vos réponses
-        responseDelay: 4000 // 4s avant de répondre
-    },
-    
     // Connexion vocale
     voice: {
         channelId: "1398387735181656094",
@@ -52,9 +35,6 @@ app.listen(PORT, () => {
 
 // Variables d'état
 const state = {
-    autoReply: {
-        lastReplyTime: 0
-    },
     voice: {
         attempts: 0,
         success: false,
@@ -69,50 +49,6 @@ client.on("ready", async () => {
     console.log(`\n🎮 ${client.user.username} prêt!`);
     await connectToVoice();
 });
-
-client.on("messageCreate", async (message) => {
-    handleAutoReply(message);
-});
-
-// Fonctionnalité de réponse automatique
-async function handleAutoReply(message) {
-    const { autoReply } = config;
-    const { lastReplyTime } = state.autoReply;
-    
-    // Vérifications de base
-    if (message.channelId !== autoReply.targetChannelId) return;
-    if (message.author.id !== autoReply.targetBotId) return;
-    if (message.author.id === client.user.id) return;
-
-    // Vérifier si le message est un message de bienvenue
-    const isWelcomeMessage = autoReply.welcomeMessages.some(word => 
-        message.content.toLowerCase().includes(word)
-    );
-
-    if (isWelcomeMessage && message.mentions.users.size > 0) {
-        const now = Date.now();
-        if (now - lastReplyTime < autoReply.cooldown) return;
-
-        try {
-            // Récupérer le premier utilisateur mentionné
-            const mentionedUser = message.mentions.users.first();
-            
-            // Choisir une réponse aléatoire
-            const randomResponse = autoReply.responses[
-                Math.floor(Math.random() * autoReply.responses.length)
-            ].replace('{user}', `<@${mentionedUser.id}>`);
-            
-            // Délai avant réponse
-            await new Promise(resolve => setTimeout(resolve, autoReply.responseDelay));
-            
-            await message.reply(randomResponse);
-            console.log(`[${new Date().toLocaleTimeString()}] Répondu à ${message.author.username} pour ${mentionedUser.tag}: "${randomResponse}"`);
-            state.autoReply.lastReplyTime = Date.now();
-        } catch (error) {
-            console.error("Erreur lors de la réponse:", error);
-        }
-    }
-}
 
 // Fonctionnalité de connexion vocale
 async function connectToVoice() {
