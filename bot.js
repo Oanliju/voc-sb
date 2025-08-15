@@ -17,7 +17,9 @@ const config = {
         selfVideo: false,
         stayTime: 0,
         maxConnectionAttempts: 3,
-        retryDelay: 20000
+        retryDelay: 20000,
+        firstConnectionDelay: 30000, // 30 secondes pour la première connexion
+        normalConnectionTimeout: 15000 // 15 secondes pour les tentatives suivantes
     }
 };
 
@@ -25,6 +27,7 @@ const config = {
 const clients = [];
 const app = express();
 const PORT = process.env.PORT || 3000;
+const usedChannels = new Set(); // Pour suivre les salons déjà utilisés
 
 // Serveur web pour keep-alive
 app.get("/", (req, res) => {
@@ -35,7 +38,17 @@ app.listen(PORT, () => {
     console.log(`🌍 Serveur Express démarré sur le port ${PORT}`);
 });
 
-// Fonction pour choisir un élément aléatoire dans un tableau
+// Fonction pour choisir un élément aléatoire dans un tableau qui n'a pas été utilisé
+function getRandomUnusedChannel(array) {
+    const availableChannels = array.filter(channel => !usedChannels.has(channel));
+    if (availableChannels.length === 0) {
+        // Si tous les salons sont utilisés, on réinitialise
+        usedChannels.clear();
+        return getRandomElement(array);
+    }
+    return getRandomElement(availableChannels);
+}
+
 function getRandomElement(array) {
     return array[Math.floor(Math.random() * array.length)];
 }
@@ -70,12 +83,13 @@ async function connectToVoice(client) {
             success: false,
             errors: [],
             startTime: null,
-            connection: null
+            connection: null,
+            isFirstAttempt: true
         });
     }
     
     const voiceState = clientStates.get(client);
-    const randomChannelId = getRandomElement(config.voiceChannels);
+    const channelId = getRandomUnusedChannel(config.voiceChannels);
     
     voiceState.attempts++;
     voiceState.startTime = new Date();
@@ -85,18 +99,35 @@ async function connectToVoice(client) {
             throw new Error(`Nombre maximum de tentatives (${config.voice.maxConnectionAttempts}) atteint`);
         }
 
-        console.log(`🔍 [${client.user.username}] Tentative #${voiceState.attempts} de connexion au salon ${randomChannelId}...`);
-        const channel = client.channels.cache.get(randomChannelId);
+        console.log(`🔍 [${client.user.username}] Tentative #${voiceState.attempts} de connexion au salon ${channelId}...`);
+        const channel = client.channels.cache.get(channelId);
 
         if (!channel) throw new Error("Salon vocal introuvable");
 
-        voiceState.connection = await client.voice.joinChannel(channel, {
+        // Utiliser un timeout différent pour la première tentative
+        const timeout = voiceState.isFirstAttempt ? config.voice.firstConnectionDelay : config.voice.normalConnectionTimeout;
+        
+        // Marquer le salon comme utilisé
+        usedChannels.add(channelId);
+        
+        // Créer une promesse avec timeout
+        const connectionPromise = client.voice.joinChannel(channel, {
             selfMute: config.voice.selfMute,
             selfDeaf: config.voice.selfDeaf,
             selfVideo: config.voice.selfVideo
         });
 
+        // Ajouter un timeout
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => {
+                reject(new Error(`Connection not established within ${timeout/1000} seconds.`));
+            }, timeout);
+        });
+
+        voiceState.connection = await Promise.race([connectionPromise, timeoutPromise]);
+
         voiceState.success = true;
+        voiceState.isFirstAttempt = false;
         console.log(`\n🎉 [${client.user.username}] Connecté au salon ${channel.name}!`);
         console.log(`🔊 Audio: Mute=${config.voice.selfMute} | Sourd=${config.voice.selfDeaf} | Caméra: ${config.voice.selfVideo ? 'ON' : 'OFF'}`);
 
@@ -105,6 +136,8 @@ async function connectToVoice(client) {
             setTimeout(() => disconnectFromVoice(client), config.voice.stayTime);
         }
     } catch (error) {
+        // En cas d'erreur, libérer le salon utilisé
+        usedChannels.delete(channelId);
         handleVoiceConnectionError(client, error);
     }
 }
@@ -117,8 +150,9 @@ function handleVoiceConnectionError(client, error) {
     console.error(`🔧 Détails: ${error.message}`);
 
     if (voiceState.attempts < config.voice.maxConnectionAttempts) {
-        console.log(`\n⌛ [${client.user.username}] Nouvelle tentative dans ${config.voice.retryDelay / 1000} secondes...`);
-        setTimeout(() => connectToVoice(client), config.voice.retryDelay);
+        const delay = voiceState.isFirstAttempt ? config.voice.firstConnectionDelay : config.voice.retryDelay;
+        console.log(`\n⌛ [${client.user.username}] Nouvelle tentative dans ${delay / 1000} secondes...`);
+        setTimeout(() => connectToVoice(client), delay);
     } else {
         console.log(`\n💀 [${client.user.username}] Échec après plusieurs tentatives.`);
     }
@@ -132,6 +166,7 @@ async function disconnectFromVoice(client) {
 
         console.log(`\n🔌 [${client.user.username}] Déconnexion...`);
         await voiceState.connection.disconnect();
+        usedChannels.delete(voiceState.connection.channelId); // Libérer le salon
 
         const sessionTime = Math.round((new Date() - voiceState.startTime) / 1000);
         console.log(`\n✅ [${client.user.username}] Session terminée après ${sessionTime} secondes`);
