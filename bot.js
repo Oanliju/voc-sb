@@ -110,6 +110,7 @@ async function connectToVoice(client) {
             }),
             new Promise((_, reject) => 
                 setTimeout(() => reject(new Error('Timeout')), config.voice.connectionTimeout)
+            )
         ]);
 
         state.connected = true;
