@@ -1,163 +1,119 @@
+const { Client, GatewayIntentBits, SlashCommandBuilder, Routes, REST, ActivityType } = require('discord.js');
+const { channel } = require('diagnostics_channel');
 require('dotenv').config();
-const { Client } = require('discord.js-selfbot-v13');
-const express = require('express');
 
-// Configuration globale
-const config = {
-    // Liste des tokens Discord
-    tokens: process.env.DISCORD_TOKENS.split(','),
-    
-    // Liste des channels vocaux (doit avoir le même nombre d'éléments que tokens)
-    voiceChannels: process.env.VOICE_CHANNELS.split(','),
-    
-    // Connexion vocale
-    voice: {
-        selfMute: false,
-        selfDeaf: false,
-        selfVideo: false,
-        maxConnectionAttempts: 3, // Tentatives max par token
-        retryDelay: 30000, // 30 secondes entre les tentatives
-        connectionTimeout: 30000 // 30 secondes timeout
-    }
-};
-
-// Initialisation
-const clients = [];
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Serveur web pour keep-alive
-app.get("/", (req, res) => {
-    res.send("✅ Bot en ligne et actif !");
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildPresences,
+        GatewayIntentBits.GuildVoiceStates
+    ]
 });
 
-app.listen(PORT, () => {
-    console.log(`🌍 Serveur Express démarré sur le port ${PORT}`);
+const token = process.env.DISCORD_TOKEN;
+const guildId = process.env.GUILD_ID; // Optionnel : pour les commandes slash en mode dev
+
+// Configuration des compteurs
+const counters = [
+    { type: 'all', name: '👥 Membres Totaux', format: count => `👥・Membres: ${count}` },
+    { type: 'online', name: '🟢 En Ligne', format: count => `🟢・En ligne: ${count}` },
+    { type: 'bots', name: '🤖 Bots', format: count => `🤖・Bots: ${count}` },
+    { type: 'voice', name: '🔊 En Vocal', format: count => `🔊・En vocal: ${count}` }
+];
+
+// Stockage des IDs des salons de compteur
+let counterChannels = {};
+
+// Commandes Slash
+const commands = [
+    new SlashCommandBuilder()
+        .setName('setup')
+        .setDescription('Configure les salons de compteur')
+        .addChannelOption(option =>
+            option.setName('category')
+                .setDescription('Catégorie où créer les salons')
+                .setRequired(true))
+].map(command => command.toJSON());
+
+// Enregistrement des commandes
+const rest = new REST({ version: '10' }).setToken(token);
+rest.put(Routes.applicationGuildCommands(client.user.id, guildId), { body: commands })
+    .then(() => console.log('Commandes enregistrées.'))
+    .catch(console.error);
+
+client.once('ready', () => {
+    console.log(`✅ Connecté en tant que ${client.user.tag}`);
+    client.user.setActivity('📊 Compter les membres', { type: ActivityType.Watching });
+
+    // Met à jour les compteurs toutes les 15 minutes (900000 ms)
+    setInterval(updateCounters, 900000);
+    updateCounters();
 });
 
-// Stockage des états
-const clientStates = new Map();
+// Fonction pour mettre à jour tous les compteurs
+async function updateCounters() {
+    const guild = client.guilds.cache.first(); // Prend la première guilde
+    if (!guild) return;
 
-// Création et connexion des clients
-async function initializeClients() {
-    // Vérifier qu'on a autant de tokens que de channels
-    if (config.tokens.length !== config.voiceChannels.length) {
-        console.error('❌ ERREUR: Le nombre de tokens et de channels doit être égal');
-        process.exit(1);
-    }
+    await guild.members.fetch(); // Met en cache les membres
+    await guild.channels.fetch(); // Met en cache les salons
 
-    for (let i = 0; i < config.tokens.length; i++) {
-        const token = config.tokens[i];
-        const channelId = config.voiceChannels[i];
-        
-        const client = new Client({ 
-            checkUpdate: false,
-            restRequestTimeout: 60000 // Augmente le timeout des requêtes
-        });
-        
-        clients.push(client);
-        clientStates.set(client, {
-            channelId: channelId,
-            attempts: 0,
-            connected: false
-        });
+    // Calcul des statistiques
+    const totalMembers = guild.memberCount;
+    const onlineMembers = guild.members.cache.filter(m => m.presence?.status === 'online' || m.presence?.status === 'idle' || m.presence?.status === 'dnd').size;
+    const bots = guild.members.cache.filter(m => m.user.bot).size;
+    const inVoice = guild.members.cache.filter(m => m.voice.channel).size;
 
-        client.on("ready", async () => {
-            console.log(`🎮 ${client.user.username} prêt!`);
-            await connectToVoice(client);
-        });
+    const stats = {
+        all: totalMembers,
+        online: onlineMembers,
+        bots: bots,
+        voice: inVoice
+    };
 
-        client.on("disconnect", () => {
-            console.log(`🔌 ${client.user.username} déconnecté!`);
-            clientStates.get(client).connected = false;
-        });
-
-        client.on("error", error => {
-            console.error(`🚨 ERREUR sur ${client.user.username}:`, error.message);
-        });
-
-        try {
-            await client.login(token);
-        } catch (error) {
-            console.error(`🔑 ERREUR DE LOGIN pour le token ${i+1}:`, error.message);
+    // Met à jour les salons
+    for (const [type, channelId] of Object.entries(counterChannels)) {
+        const channel = guild.channels.cache.get(channelId);
+        if (channel) {
+            const format = counters.find(c => c.type === type)?.format;
+            if (format) {
+                channel.setName(format(stats[type])).catch(console.error);
+            }
         }
     }
 }
 
-// Connexion vocale
-async function connectToVoice(client) {
-    const state = clientStates.get(client);
-    
-    if (state.connected || state.attempts >= config.voice.maxConnectionAttempts) {
-        return;
-    }
+// Gestionnaire de commandes slash
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isCommand()) return;
 
-    state.attempts++;
-    console.log(`🔍 [${client.user.username}] Tentative #${state.attempts} vers le salon ${state.channelId}...`);
-
-    try {
-        const channel = client.channels.cache.get(state.channelId);
-        if (!channel) {
-            throw new Error("Salon vocal introuvable");
+    if (interaction.commandName === 'setup') {
+        const category = interaction.options.getChannel('category');
+        if (category.type !== ChannelType.GuildCategory) {
+            return interaction.reply({ content: 'Veuillez sélectionner une catégorie valide.', ephemeral: true });
         }
 
-        // Configuration de la connexion avec timeout
-        const connection = await Promise.race([
-            client.voice.joinChannel(channel, {
-                selfMute: config.voice.selfMute,
-                selfDeaf: config.voice.selfDeaf,
-                selfVideo: config.voice.selfVideo
-            }),
-            new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout')), config.voice.connectionTimeout)
-            )
-        ]);
-
-        state.connected = true;
-        state.attempts = 0; // Réinitialiser les tentatives après succès
-        
-        console.log(`🎉 [${client.user.username}] Connecté au salon ${channel.name}!`);
-        console.log(`🔊 Audio: Mute=${config.voice.selfMute} | Sourd=${config.voice.selfDeaf}`);
-
-        // Gestion de la déconnexion
-        connection.on('disconnect', () => {
-            state.connected = false;
-            console.log(`🔌 [${client.user.username}] Déconnecté du salon ${channel.name}`);
-            setTimeout(() => connectToVoice(client), config.voice.retryDelay);
-        });
-
-    } catch (error) {
-        console.error(`❌ [${client.user.username}] Erreur (tentative ${state.attempts}/${config.voice.maxConnectionAttempts}):`, error.message);
-        
-        if (state.attempts < config.voice.maxConnectionAttempts) {
-            setTimeout(() => connectToVoice(client), config.voice.retryDelay);
-        } else {
-            console.error(`💀 [${client.user.username}] Abandon après ${config.voice.maxConnectionAttempts} tentatives`);
+        // Crée les salons de compteur
+        for (const counter of counters) {
+            const channelName = counter.format(0); // Format initial avec 0
+            const channel = await interaction.guild.channels.create({
+                name: channelName,
+                type: ChannelType.GuildVoice,
+                parent: category.id,
+                permissionOverwrites: [
+                    {
+                        id: interaction.guild.id,
+                        deny: [PermissionFlagsBits.Connect] // Empêche la connexion vocale
+                    }
+                ]
+            });
+            counterChannels[counter.type] = channel.id;
         }
+
+        await interaction.reply({ content: '✅ Configuration terminée ! Les salons ont été créés.', ephemeral: true });
+        updateCounters();
     }
-}
-
-// Gestion des erreurs globales
-process.on("unhandledRejection", error => {
-    console.error("🚨 ERREUR (unhandledRejection):", error.message);
 });
 
-process.on("uncaughtException", error => {
-    console.error("💥 CRASH (uncaughtException):", error);
-    process.exit(1);
-});
-
-// Nettoyage avant arrêt
-process.on('SIGINT', async () => {
-    console.log("\n🔌 Déconnexion des clients...");
-    for (const client of clients) {
-        if (client.voice?.connection) {
-            await client.voice.connection.disconnect().catch(() => {});
-        }
-        client.destroy();
-    }
-    process.exit();
-});
-
-// Démarrage
-initializeClients();
+client.login(token);
