@@ -40,7 +40,7 @@ if (fs.existsSync(CONFIG_PATH)) {
 // Compteurs (sans les bots)
 const counters = [
     { type: 'all', format: count => `🌺ゝMembres : ${count}` },
-    { type: 'online', format: count => `🟢ゝEn ligne: ${count}` },
+    { type: 'online', format: count => `🌴ゝEn ligne: ${count}` },
     { type: 'voice', format: count => `🔊ゝEn vocal: ${count}` }
 ];
 
@@ -124,7 +124,7 @@ client.once('ready', async () => {
 
     await detectExistingCounters();
     updateCounters();
-    setInterval(updateCounters, 3 * 60 * 1000); // Mise à jour toutes les 3 min
+    setInterval(updateCounters, 5 * 60 * 1000); // Mise à jour toutes les 5 min
 });
 
 // --- GESTIONNAIRE DE SLASH COMMANDS --- //
