@@ -9,6 +9,7 @@ const {
     PermissionFlagsBits 
 } = require('discord.js');
 const fs = require('fs');
+const http = require('http');
 require('dotenv').config();
 
 const client = new Client({
@@ -158,3 +159,12 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.login(token);
+
+// --- SERVEUR HTTP POUR RENDER ---
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot Discord en fonctionnement !');
+}).listen(PORT, () => {
+    console.log(`🌐 Serveur HTTP actif sur le port ${PORT}`);
+});
