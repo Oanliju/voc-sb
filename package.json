@@ -1,29 +1,21 @@
 {
   "name": "discord-member-counter-bot",
   "version": "1.0.0",
-  "description": "Un bot Discord qui compte les membres, les bots, les utilisateurs en ligne et dans les salons vocaux",
-  "main": "index.js",
+  "description": "Un bot Discord qui compte les membres, les utilisateurs en ligne et dans les salons vocaux",
+  "main": "bot.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node index.js | pino-pretty -i pid,hostname -t 'yyyy-mm-dd HH:MM:ss'",
-    "lint": "eslint ."
+    "start": "node bot.js"
   },
   "keywords": [
     "discord",
     "bot",
     "member",
-    "counter",
-    "statistics"
+    "counter"
   ],
   "author": "TonNom",
   "license": "ISC",
   "dependencies": {
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.5"
-  },
-  "devDependencies": {
-    "eslint": "^8.57.0",
-    "pino": "^8.21.1",
-    "pino-pretty": "^10.3.1"
   }
 }
